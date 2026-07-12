@@ -1,12 +1,18 @@
 # -*- coding: utf-8 -*-
 """
-日経平均 理論株価サイト 自動生成スクリプト（GitHub Pages用）
+日経平均 理論株価サイト 自動生成スクリプト v2
 ================================================================
-nikkei225jp.com/data/per.php から最新データを取得し、
+nikkei225jp.com のデータファイル daily2.json から直接データを取得し、
 PER11倍～21倍の理論株価を表示する index.html を生成します。
-GitHub Actions から毎日実行される想定です。
+
+【v2の変更点】
+per.php のHTML表はJavaScriptで組み立てられており直接読めないため、
+表の元データである daily2.json を取得する方式に変更。
+EPS・BPSはページと同じ計算式（日経平均÷PER、日経平均÷PBR）で算出。
+PERは「加重平均」ベース（ページの初期表示と同じ）。
 """
 
+import json
 import os
 import re
 import sys
@@ -14,68 +20,103 @@ from datetime import datetime, timezone, timedelta
 from string import Template
 
 import requests
-from bs4 import BeautifulSoup
 
-URL = "https://nikkei225jp.com/data/per.php"
+DATA_URL = "https://nikkei225jp.com/_data/_nfsDATA/DAY/daily2.json"
+PAGE_URL = "https://nikkei225jp.com/data/per.php"
 BASE = os.path.dirname(os.path.abspath(__file__))
 OUTPUT_HTML = os.path.join(BASE, "index.html")
 PER_MIN = 11
 PER_MAX = 21
+
+# DAILY配列の列番号（ページのJavaScriptより）
+COL_TIME = 0    # 日時（ミリ秒）
+COL_N225 = 1    # 日経平均
+COL_PER = 12    # PER（加重平均）
+COL_PBR = 13    # PBR（加重平均）
 
 HEADERS = {
     "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                    "AppleWebKit/537.36 (KHTML, like Gecko) "
                    "Chrome/126.0.0.0 Safari/537.36"),
     "Accept-Language": "ja,en;q=0.9",
+    "Referer": PAGE_URL,
 }
 
 JST = timezone(timedelta(hours=9))
 
 
-def to_float(text):
-    if text is None:
-        return None
-    t = text.replace(",", "").replace("+", "").replace("%", "").strip()
-    if t in ("", "-", "—"):
+def num(v):
+    """配列要素を数値化。空文字・None・0以下はNone"""
+    if v is None or v == "":
         return None
     try:
-        return float(t)
-    except ValueError:
+        f = float(v)
+        return f if f > 0 else None
+    except (TypeError, ValueError):
         return None
 
 
-def fetch_latest():
-    """最新の営業日データを1件返す"""
-    res = requests.get(URL, headers=HEADERS, timeout=30)
+def fetch_daily():
+    """daily2.json を取得してリストで返す"""
+    res = requests.get(DATA_URL, headers=HEADERS, timeout=30)
     res.raise_for_status()
-    res.encoding = res.apparent_encoding
-    soup = BeautifulSoup(res.text, "html.parser")
+    text = res.text.strip()
 
-    date_pattern = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-    records = []
-    for tr in soup.find_all("tr"):
-        cells = [td.get_text(strip=True) for td in tr.find_all(["td", "th"])]
-        if not cells or not date_pattern.match(cells[0]):
+    # ファイルは「DAILY=[[...],...];」のようなJavaScript形式の可能性があるため、
+    # 最初の [ から最後の ] までを取り出す
+    start = text.find("[")
+    end = text.rfind("]")
+    if start == -1 or end == -1:
+        raise RuntimeError("daily2.json の形式が想定外です")
+    body = text[start:end + 1]
+
+    # JavaScriptの省略記法（,, や [, など）をJSONで読めるよう補正
+    body = re.sub(r",\s*(?=,)", ",null", body)   # ,, → ,null,
+    body = re.sub(r"\[\s*,", "[null,", body)      # [, → [null,
+    body = re.sub(r",\s*\]", ",null]", body)      # ,] → ,null]
+
+    data = json.loads(body)
+    if not isinstance(data, list) or not data:
+        raise RuntimeError("daily2.json にデータがありません")
+    return data
+
+
+def latest_record(daily):
+    """最新の有効な営業日データを返す（前日比も計算）"""
+    valid = []
+    for row in daily:
+        if not isinstance(row, list) or len(row) <= COL_PBR:
             continue
-        if len(cells) < 8:
-            continue
-        rec = {
-            "date":   cells[0],
-            "nikkei": to_float(cells[1]),
-            "change": to_float(cells[2]),
-            "per":    to_float(cells[4]),
-            "pbr":    to_float(cells[5]),
-            "eps":    to_float(cells[6]),
-            "bps":    to_float(cells[7]),
-        }
-        if rec["nikkei"] and rec["eps"]:
-            records.append(rec)
+        t = row[COL_TIME]
+        n225 = num(row[COL_N225])
+        per = num(row[COL_PER])
+        pbr = num(row[COL_PBR])
+        if t and n225 and per:
+            valid.append({"t": t, "nikkei": n225, "per": per, "pbr": pbr})
 
-    if not records:
-        raise RuntimeError("データを取得できませんでした（表の構造変更の可能性）")
+    if not valid:
+        raise RuntimeError("有効なデータ行が見つかりませんでした")
 
-    records.sort(key=lambda r: r["date"], reverse=True)
-    return records[0]
+    valid.sort(key=lambda r: r["t"])
+    latest = valid[-1]
+    prev = valid[-2] if len(valid) >= 2 else None
+
+    # タイムスタンプ(ms, UTC) → JST日付
+    d = datetime.fromtimestamp(latest["t"] / 1000, tz=timezone.utc) + timedelta(hours=9)
+
+    eps = latest["nikkei"] / latest["per"]
+    bps = latest["nikkei"] / latest["pbr"] if latest["pbr"] else None
+    change = latest["nikkei"] - prev["nikkei"] if prev else None
+
+    return {
+        "date": d.strftime("%Y-%m-%d"),
+        "nikkei": latest["nikkei"],
+        "change": change,
+        "per": latest["per"],
+        "pbr": latest["pbr"],
+        "eps": eps,
+        "bps": bps,
+    }
 
 
 HTML_TEMPLATE = Template(r"""<!DOCTYPE html>
@@ -89,14 +130,13 @@ HTML_TEMPLATE = Template(r"""<!DOCTYPE html>
 <link href="https://fonts.googleapis.com/css2?family=Zen+Old+Mincho:wght@700;900&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
   :root{
-    --ink:#20242c;        /* 墨 */
+    --ink:#20242c;
     --ink-soft:#5a6272;
     --paper:#ffffff;
-    --panel:#f2f4f7;      /* 薄鼠 */
+    --panel:#f2f4f7;
     --rule:#d8dce3;
-    --indigo:#2b4a6f;     /* 藍 */
-    --vermilion:#c9432b;  /* 朱：現在位置のみに使用 */
-    --num:'Noto Sans JP',sans-serif;
+    --indigo:#2b4a6f;
+    --vermilion:#c9432b;
   }
   *{margin:0;padding:0;box-sizing:border-box}
   body{
@@ -107,7 +147,6 @@ HTML_TEMPLATE = Template(r"""<!DOCTYPE html>
   }
   .wrap{max-width:720px;margin:0 auto;padding:0 20px 64px}
 
-  /* 題字 */
   header{border-bottom:3px double var(--ink);padding:28px 0 16px;margin-bottom:8px}
   h1{
     font-family:'Zen Old Mincho',serif;font-weight:900;
@@ -117,7 +156,6 @@ HTML_TEMPLATE = Template(r"""<!DOCTYPE html>
   .dateline .d{font-size:15px;font-weight:700;letter-spacing:.05em}
   .dateline .u{font-size:12px;color:var(--ink-soft)}
 
-  /* 現況 */
   .stats{display:grid;grid-template-columns:repeat(4,1fr);border:1px solid var(--rule);border-radius:6px;overflow:hidden;margin:20px 0 28px}
   .stat{padding:12px 8px;text-align:center;background:var(--panel)}
   .stat+.stat{border-left:1px solid var(--rule)}
@@ -126,7 +164,6 @@ HTML_TEMPLATE = Template(r"""<!DOCTYPE html>
   .stat .v.up{color:var(--vermilion)}
   .stat .v.down{color:var(--indigo)}
 
-  /* 理論株価はしご */
   h2{font-family:'Zen Old Mincho',serif;font-size:18px;font-weight:700;letter-spacing:.1em;margin-bottom:4px}
   .note{font-size:12px;color:var(--ink-soft);margin-bottom:14px}
   table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
@@ -142,7 +179,6 @@ HTML_TEMPLATE = Template(r"""<!DOCTYPE html>
   tr.above td{color:var(--ink)}
   tr.below td{color:var(--ink-soft)}
 
-  /* 現在値マーカー行 */
   tr.now td{
     border-top:2px solid var(--vermilion);
     border-bottom:2px solid var(--vermilion);
@@ -178,7 +214,7 @@ HTML_TEMPLATE = Template(r"""<!DOCTYPE html>
   </div>
 
   <h2>PER別 理論株価</h2>
-  <p class="note">理論株価 ＝ EPS $eps 円 × PER倍率。朱色の線が現在の日経平均の位置です。</p>
+  <p class="note">理論株価 ＝ EPS $eps 円 × PER倍率（加重平均ベース）。朱色の線が現在の日経平均の位置です。</p>
 
   <table>
     <thead>
@@ -204,12 +240,10 @@ def build_html(rec):
     nikkei = rec["nikkei"]
     per_now = rec["per"] or (nikkei / eps)
 
-    # PER21→11の降順で行を作り、現在値の位置にマーカー行を挿入
     rows = []
     marker_inserted = False
     for p in range(PER_MAX, PER_MIN - 1, -1):
         price = eps * p
-        # 現在PERがこの行と次の行の間にあればマーカーを挿入
         if (not marker_inserted) and per_now >= p:
             rows.append(
                 f'      <tr class="now"><td>現在 {per_now:.2f}倍</td>'
@@ -255,8 +289,10 @@ def build_html(rec):
 
 def main():
     try:
-        rec = fetch_latest()
-        print(f"取得成功: {rec['date']} 日経平均 {rec['nikkei']:,.2f} / EPS {rec['eps']:,.2f}")
+        daily = fetch_daily()
+        rec = latest_record(daily)
+        print(f"取得成功: {rec['date']} 日経平均 {rec['nikkei']:,.2f} / "
+              f"PER {rec['per']:.2f} / EPS {rec['eps']:,.2f}")
     except Exception as e:
         print(f"エラー: {e}")
         sys.exit(1)
