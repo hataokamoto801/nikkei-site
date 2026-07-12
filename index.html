@@ -9,14 +9,13 @@
 <link href="https://fonts.googleapis.com/css2?family=Zen+Old+Mincho:wght@700;900&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
   :root{
-    --ink:#20242c;        /* 墨 */
+    --ink:#20242c;
     --ink-soft:#5a6272;
     --paper:#ffffff;
-    --panel:#f2f4f7;      /* 薄鼠 */
+    --panel:#f2f4f7;
     --rule:#d8dce3;
-    --indigo:#2b4a6f;     /* 藍 */
-    --vermilion:#c9432b;  /* 朱：現在位置のみに使用 */
-    --num:'Noto Sans JP',sans-serif;
+    --indigo:#2b4a6f;
+    --vermilion:#c9432b;
   }
   *{margin:0;padding:0;box-sizing:border-box}
   body{
@@ -27,7 +26,6 @@
   }
   .wrap{max-width:720px;margin:0 auto;padding:0 20px 64px}
 
-  /* 題字 */
   header{border-bottom:3px double var(--ink);padding:28px 0 16px;margin-bottom:8px}
   h1{
     font-family:'Zen Old Mincho',serif;font-weight:900;
@@ -37,7 +35,6 @@
   .dateline .d{font-size:15px;font-weight:700;letter-spacing:.05em}
   .dateline .u{font-size:12px;color:var(--ink-soft)}
 
-  /* 現況 */
   .stats{display:grid;grid-template-columns:repeat(4,1fr);border:1px solid var(--rule);border-radius:6px;overflow:hidden;margin:20px 0 28px}
   .stat{padding:12px 8px;text-align:center;background:var(--panel)}
   .stat+.stat{border-left:1px solid var(--rule)}
@@ -46,7 +43,6 @@
   .stat .v.up{color:var(--vermilion)}
   .stat .v.down{color:var(--indigo)}
 
-  /* 理論株価はしご */
   h2{font-family:'Zen Old Mincho',serif;font-size:18px;font-weight:700;letter-spacing:.1em;margin-bottom:4px}
   .note{font-size:12px;color:var(--ink-soft);margin-bottom:14px}
   table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
@@ -62,7 +58,6 @@
   tr.above td{color:var(--ink)}
   tr.below td{color:var(--ink-soft)}
 
-  /* 現在値マーカー行 */
   tr.now td{
     border-top:2px solid var(--vermilion);
     border-bottom:2px solid var(--vermilion);
@@ -86,19 +81,19 @@
     <h1>日経平均 理論株価</h1>
     <div class="dateline">
       <span class="d">2026年7月10日（金） 現在</span>
-      <span class="u">毎日18時ごろ自動更新 ｜ 更新: 07/12 21:15 JST</span>
+      <span class="u">毎日18時ごろ自動更新 ｜ 更新: 07/12 22:16 JST</span>
     </div>
   </header>
 
   <div class="stats">
     <div class="stat"><div class="l">日経平均</div><div class="v up">68,557.73</div></div>
-    <div class="stat"><div class="l">前日比</div><div class="v up">+813.86</div></div>
+    <div class="stat"><div class="l">前日比</div><div class="v up">+813.88</div></div>
     <div class="stat"><div class="l">PER</div><div class="v">18.18 倍</div></div>
     <div class="stat"><div class="l">EPS</div><div class="v">3,771.05</div></div>
   </div>
 
   <h2>PER別 理論株価</h2>
-  <p class="note">理論株価 ＝ EPS 3,771.05 円 × PER倍率。朱色の線が現在の日経平均の位置です。</p>
+  <p class="note">理論株価 ＝ EPS 3,771.05 円 × PER倍率（加重平均ベース）。朱色の線が現在の日経平均の位置です。</p>
 
   <table>
     <thead>
