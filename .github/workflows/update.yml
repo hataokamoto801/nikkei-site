@@ -2,8 +2,10 @@ name: 理論株価サイト 毎日更新
 
 on:
   schedule:
-    # 毎日 日本時間18:00（UTC 09:00）
-    - cron: "0 9 * * *"
+    # 毎日 日本時間17:23（混雑する0分を避ける）
+    - cron: "23 8 * * *"
+    # 保険：日本時間19:43にもう一度
+    - cron: "43 10 * * *"
   workflow_dispatch:
 
 permissions:
