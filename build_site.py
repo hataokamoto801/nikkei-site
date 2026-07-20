@@ -1,15 +1,14 @@
 # -*- coding: utf-8 -*-
 """
-日経平均 理論株価サイト 自動生成スクリプト v2
+日経平均 理論株価サイト 自動生成スクリプト v3
 ================================================================
-nikkei225jp.com のデータファイル daily2.json から直接データを取得し、
-PER11倍～21倍の理論株価を表示する index.html を生成します。
+【v3の変更点】
+nikkei225jp.com が海外サーバーからのアクセスを遮断(403)したため、
+一次データ源を日経公式「日経平均プロフィル」の日次サマリーに変更。
+  https://indexes.nikkei.co.jp/nkave/archives/summary
+公式が取得できない場合のみ、旧ソース(daily2.json)にフォールバック。
 
-【v2の変更点】
-per.php のHTML表はJavaScriptで組み立てられており直接読めないため、
-表の元データである daily2.json を取得する方式に変更。
-EPS・BPSはページと同じ計算式（日経平均÷PER、日経平均÷PBR）で算出。
-PERは「加重平均」ベース（ページの初期表示と同じ）。
+EPS = 日経平均終値 ÷ PER(加重平均) で算出（従来と同じ計算方法）。
 """
 
 import json
@@ -20,33 +19,108 @@ from datetime import datetime, timezone, timedelta
 from string import Template
 
 import requests
+from bs4 import BeautifulSoup
 
-DATA_URL = "https://nikkei225jp.com/_data/_nfsDATA/DAY/daily2.json"
-PAGE_URL = "https://nikkei225jp.com/data/per.php"
+OFFICIAL_URL = "https://indexes.nikkei.co.jp/nkave/archives/summary"
+FALLBACK_URL = "https://nikkei225jp.com/_data/_nfsDATA/DAY/daily2.json"
 BASE = os.path.dirname(os.path.abspath(__file__))
 OUTPUT_HTML = os.path.join(BASE, "index.html")
 PER_MIN = 11
 PER_MAX = 21
-
-# DAILY配列の列番号（ページのJavaScriptより）
-COL_TIME = 0    # 日時（ミリ秒）
-COL_N225 = 1    # 日経平均
-COL_PER = 12    # PER（加重平均）
-COL_PBR = 13    # PBR（加重平均）
 
 HEADERS = {
     "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                    "AppleWebKit/537.36 (KHTML, like Gecko) "
                    "Chrome/126.0.0.0 Safari/537.36"),
     "Accept-Language": "ja,en;q=0.9",
-    "Referer": PAGE_URL,
 }
 
 JST = timezone(timedelta(hours=9))
 
+NUM = r"[+\-−▲]?\d{1,3}(?:,\d{3})*(?:\.\d+)?"
 
-def num(v):
-    """配列要素を数値化。空文字・None・0以下はNone"""
+
+def parse_num(s):
+    """カンマ・全角マイナス・▲を処理して数値化"""
+    if s is None:
+        return None
+    t = (s.replace(",", "").replace("−", "-").replace("▲", "-")
+          .replace("+", "").strip())
+    try:
+        return float(t)
+    except ValueError:
+        return None
+
+
+# ---------------------------------------------------------------
+# 一次ソース: 日経平均プロフィル（公式）
+# ---------------------------------------------------------------
+def fetch_official():
+    res = requests.get(OFFICIAL_URL, headers=HEADERS, timeout=30)
+    res.raise_for_status()
+    soup = BeautifulSoup(res.text, "html.parser")
+    text = soup.get_text(" ", strip=True)
+
+    # 日付「2026年7月17日(金)」
+    m_date = re.search(r"(\d{4})年(\d{1,2})月(\d{1,2})日", text)
+    if not m_date:
+        raise RuntimeError("公式: 日付が見つかりません")
+    y, mo, dd = map(int, m_date.groups())
+    date_str = f"{y:04d}-{mo:02d}-{dd:02d}"
+
+    # 日付以降のテキストを対象に解析
+    t = text[m_date.end():]
+
+    # 「日経平均株価 64,141.12 -4.03% -2,694.42」の並びを探す
+    m_px = re.search(
+        r"日経平均株価\s*(" + NUM + r")\s*(" + NUM + r")%\s*(" + NUM + r")", t)
+    if m_px:
+        nikkei = parse_num(m_px.group(1))
+        change = parse_num(m_px.group(3))
+    else:
+        # 並びが違う場合: 日経平均株価の直後の数値だけ拾う
+        m_px2 = re.search(r"日経平均株価\s*(" + NUM + r")", t)
+        if not m_px2:
+            raise RuntimeError("公式: 日経平均終値が見つかりません")
+        nikkei = parse_num(m_px2.group(1))
+        change = None
+
+    # PER(加重平均)「株価収益率(PER) 加重平均 17.42倍」
+    m_per = re.search(
+        r"株価収益率\s*\(?PER\)?.{0,80}?加重平均\s*(" + NUM + r")\s*倍",
+        t, re.DOTALL)
+    if not m_per:
+        raise RuntimeError("公式: PER(加重平均)が見つかりません")
+    per = parse_num(m_per.group(1))
+
+    # PBR(加重平均)（任意）
+    m_pbr = re.search(
+        r"株価純資産倍率\s*\(?PBR\)?.{0,80}?加重平均\s*(" + NUM + r")\s*倍",
+        t, re.DOTALL)
+    pbr = parse_num(m_pbr.group(1)) if m_pbr else None
+
+    if not (nikkei and per and nikkei > 0 and per > 0):
+        raise RuntimeError("公式: 数値の解析に失敗しました")
+
+    return {
+        "date": date_str,
+        "nikkei": nikkei,
+        "change": change,
+        "per": per,
+        "pbr": pbr,
+        "eps": nikkei / per,
+        "bps": (nikkei / pbr) if pbr else None,
+        "source": "日経平均プロフィル（公式）",
+    }
+
+
+# ---------------------------------------------------------------
+# フォールバック: 旧ソース daily2.json
+# ---------------------------------------------------------------
+COL_TIME, COL_N225, COL_PER, COL_PBR = 0, 1, 12, 13
+
+
+def num_pos(v):
     if v is None or v == "":
         return None
     try:
@@ -56,66 +130,43 @@ def num(v):
         return None
 
 
-def fetch_daily():
-    """daily2.json を取得してリストで返す"""
-    res = requests.get(DATA_URL, headers=HEADERS, timeout=30)
+def fetch_fallback():
+    h = dict(HEADERS)
+    h["Referer"] = "https://nikkei225jp.com/data/per.php"
+    res = requests.get(FALLBACK_URL, headers=h, timeout=30)
     res.raise_for_status()
     text = res.text.strip()
-
-    # ファイルは「DAILY=[[...],...];」のようなJavaScript形式の可能性があるため、
-    # 最初の [ から最後の ] までを取り出す
-    start = text.find("[")
-    end = text.rfind("]")
+    start, end = text.find("["), text.rfind("]")
     if start == -1 or end == -1:
-        raise RuntimeError("daily2.json の形式が想定外です")
+        raise RuntimeError("フォールバック: 形式が想定外です")
     body = text[start:end + 1]
-
-    # JavaScriptの省略記法（,, や [, など）をJSONで読めるよう補正
-    body = re.sub(r",\s*(?=,)", ",null", body)   # ,, → ,null,
-    body = re.sub(r"\[\s*,", "[null,", body)      # [, → [null,
-    body = re.sub(r",\s*\]", ",null]", body)      # ,] → ,null]
-
+    body = re.sub(r",\s*(?=,)", ",null", body)
+    body = re.sub(r"\[\s*,", "[null,", body)
+    body = re.sub(r",\s*\]", ",null]", body)
     data = json.loads(body)
-    if not isinstance(data, list) or not data:
-        raise RuntimeError("daily2.json にデータがありません")
-    return data
 
-
-def latest_record(daily):
-    """最新の有効な営業日データを返す（前日比も計算）"""
     valid = []
-    for row in daily:
+    for row in data:
         if not isinstance(row, list) or len(row) <= COL_PBR:
             continue
-        t = row[COL_TIME]
-        n225 = num(row[COL_N225])
-        per = num(row[COL_PER])
-        pbr = num(row[COL_PBR])
+        t, n225 = row[COL_TIME], num_pos(row[COL_N225])
+        per, pbr = num_pos(row[COL_PER]), num_pos(row[COL_PBR])
         if t and n225 and per:
             valid.append({"t": t, "nikkei": n225, "per": per, "pbr": pbr})
-
     if not valid:
-        raise RuntimeError("有効なデータ行が見つかりませんでした")
-
+        raise RuntimeError("フォールバック: 有効データなし")
     valid.sort(key=lambda r: r["t"])
-    latest = valid[-1]
-    prev = valid[-2] if len(valid) >= 2 else None
-
-    # タイムスタンプ(ms, UTC) → JST日付
+    latest, prev = valid[-1], (valid[-2] if len(valid) >= 2 else None)
     d = datetime.fromtimestamp(latest["t"] / 1000, tz=timezone.utc) + timedelta(hours=9)
-
-    eps = latest["nikkei"] / latest["per"]
-    bps = latest["nikkei"] / latest["pbr"] if latest["pbr"] else None
-    change = latest["nikkei"] - prev["nikkei"] if prev else None
-
     return {
         "date": d.strftime("%Y-%m-%d"),
         "nikkei": latest["nikkei"],
-        "change": change,
+        "change": (latest["nikkei"] - prev["nikkei"]) if prev else None,
         "per": latest["per"],
         "pbr": latest["pbr"],
-        "eps": eps,
-        "bps": bps,
+        "eps": latest["nikkei"] / latest["per"],
+        "bps": (latest["nikkei"] / latest["pbr"]) if latest["pbr"] else None,
+        "source": "nikkei225jp.com",
     }
 
 
@@ -226,7 +277,7 @@ $rows
   </table>
 
   <footer>
-    データ出所: <a href="https://nikkei225jp.com/data/per.php" target="_blank" rel="noopener">nikkei225jp.com</a>（加重平均ベース）。
+    データ出所: $source。EPSは「日経平均÷PER(加重平均)」で算出。
     本ページは個人利用目的の自動生成であり、投資判断はご自身の責任でお願いします。
   </footer>
 </div>
@@ -274,6 +325,14 @@ def build_html(rec):
         change_str = f"{'+' if change >= 0 else ''}{change:,.2f}"
         chg_class = "up" if change >= 0 else "down"
 
+    src = rec.get("source", "")
+    if "公式" in src or "プロフィル" in src:
+        source_html = ('<a href="https://indexes.nikkei.co.jp/nkave/archives/summary" '
+                       'target="_blank" rel="noopener">日経平均プロフィル</a>')
+    else:
+        source_html = ('<a href="https://nikkei225jp.com/data/per.php" '
+                       'target="_blank" rel="noopener">nikkei225jp.com</a>')
+
     return HTML_TEMPLATE.substitute(
         date=rec["date"],
         date_jp=f"{d.year}年{d.month}月{d.day}日（{weekday}）",
@@ -284,17 +343,28 @@ def build_html(rec):
         per=f"{per_now:.2f}",
         eps=f"{eps:,.2f}",
         rows="\n".join(rows),
+        source=source_html,
     )
 
 
 def main():
-    try:
-        daily = fetch_daily()
-        rec = latest_record(daily)
-        print(f"取得成功: {rec['date']} 日経平均 {rec['nikkei']:,.2f} / "
-              f"PER {rec['per']:.2f} / EPS {rec['eps']:,.2f}")
-    except Exception as e:
-        print(f"エラー: {e}")
+    rec = None
+    errors = []
+    for name, fn in (("公式", fetch_official), ("フォールバック", fetch_fallback)):
+        try:
+            rec = fn()
+            print(f"[{name}] 取得成功: {rec['date']} "
+                  f"日経平均 {rec['nikkei']:,.2f} / PER {rec['per']:.2f} / "
+                  f"EPS {rec['eps']:,.2f}")
+            break
+        except Exception as e:
+            errors.append(f"[{name}] {e}")
+            print(f"[{name}] 失敗: {e}")
+
+    if rec is None:
+        print("エラー: すべてのデータ源で取得に失敗しました")
+        for e in errors:
+            print("  " + e)
         sys.exit(1)
 
     html = build_html(rec)
