@@ -35,9 +35,8 @@
   .dateline .d{font-size:15px;font-weight:700;letter-spacing:.05em}
   .dateline .u{font-size:12px;color:var(--ink-soft)}
 
-  .stats{display:grid;grid-template-columns:repeat(4,1fr);border:1px solid var(--rule);border-radius:6px;overflow:hidden;margin:20px 0 28px}
-  .stat{padding:12px 8px;text-align:center;background:var(--panel)}
-  .stat+.stat{border-left:1px solid var(--rule)}
+  .stats{display:grid;grid-template-columns:repeat(6,1fr);gap:1px;background:var(--rule);border:1px solid var(--rule);border-radius:6px;overflow:hidden;margin:20px 0 28px}
+  .stat{padding:12px 6px;text-align:center;background:var(--panel)}
   .stat .l{font-size:11px;color:var(--ink-soft);letter-spacing:.08em}
   .stat .v{font-size:clamp(15px,3.4vw,20px);font-weight:700;font-variant-numeric:tabular-nums;margin-top:2px}
   .stat .v.up{color:var(--vermilion)}
@@ -68,10 +67,14 @@
 
   footer{margin-top:36px;padding-top:14px;border-top:1px solid var(--rule);font-size:11px;color:var(--ink-soft)}
   footer a{color:var(--indigo)}
+  tr.hot td{border-bottom:2px dashed var(--vermilion)}
+  .hotmark{font-size:10px;color:var(--vermilion);font-weight:700;margin-left:6px;letter-spacing:.05em}
+  .sec{margin-top:40px}
   @media (max-width:480px){
     td{padding:9px 6px;font-size:15px}
     td.price{font-size:16px}
     th{padding:6px}
+    .stats{grid-template-columns:repeat(3,1fr)}
   }
 </style>
 </head>
@@ -81,7 +84,7 @@
     <h1>日経平均 理論株価</h1>
     <div class="dateline">
       <span class="d">2026年9月4日（金） 現在</span>
-      <span class="u">毎日18時ごろ自動更新 ｜ 更新: 09/05 22:32 JST</span>
+      <span class="u">毎日18時ごろ自動更新 ｜ 更新: 09/06 10:50 JST</span>
     </div>
   </header>
 
@@ -90,6 +93,8 @@
     <div class="stat"><div class="l">前日比</div><div class="v up">+806.46</div></div>
     <div class="stat"><div class="l">PER</div><div class="v">17.23 倍</div></div>
     <div class="stat"><div class="l">EPS</div><div class="v">3,773.71</div></div>
+    <div class="stat"><div class="l">PBR</div><div class="v">1.89 倍</div></div>
+    <div class="stat"><div class="l">BPS</div><div class="v">34,402.61</div></div>
   </div>
 
   <h2>PER別 理論株価</h2>
@@ -115,8 +120,33 @@
     </tbody>
   </table>
 
+  <div class="sec">
+  <h2>PBR別 理論株価</h2>
+  <p class="note">理論株価 ＝ BPS 34,402.61 円 × PBR倍率（加重平均ベース）。PBR2.0倍は過熱の目安とされ、その水準で調整が入る場面があります。</p>
+
+  <table>
+    <thead>
+      <tr><th>PBR</th><th>理論株価</th><th>現在値との差</th></tr>
+    </thead>
+    <tbody>
+      <tr class="above"><td>2.2倍</td><td class="price">¥75,686</td><td class="diff">+10,665円（+16.4%）</td></tr>
+      <tr class="above"><td>2.1倍</td><td class="price">¥72,245</td><td class="diff">+7,225円（+11.1%）</td></tr>
+      <tr class="above hot"><td>2.0倍<span class="hotmark">⚠ 過熱目安</span></td><td class="price">¥68,805</td><td class="diff">+3,784円（+5.8%）</td></tr>
+      <tr class="above"><td>1.9倍</td><td class="price">¥65,365</td><td class="diff">+344円（+0.5%）</td></tr>
+      <tr class="now"><td>現在 1.89倍</td><td class="price">¥65,021</td><td class="diff">―</td></tr>
+      <tr class="below"><td>1.8倍</td><td class="price">¥61,925</td><td class="diff">-3,096円（-4.8%）</td></tr>
+      <tr class="below"><td>1.7倍</td><td class="price">¥58,484</td><td class="diff">-6,536円（-10.1%）</td></tr>
+      <tr class="below"><td>1.6倍</td><td class="price">¥55,044</td><td class="diff">-9,977円（-15.3%）</td></tr>
+      <tr class="below"><td>1.5倍</td><td class="price">¥51,604</td><td class="diff">-13,417円（-20.6%）</td></tr>
+      <tr class="below"><td>1.4倍</td><td class="price">¥48,164</td><td class="diff">-16,857円（-25.9%）</td></tr>
+      <tr class="below"><td>1.3倍</td><td class="price">¥44,723</td><td class="diff">-20,298円（-31.2%）</td></tr>
+      <tr class="below"><td>1.2倍</td><td class="price">¥41,283</td><td class="diff">-23,738円（-36.5%）</td></tr>
+    </tbody>
+  </table>
+  </div>
+
   <footer>
-    データ出所: <a href="https://indexes.nikkei.co.jp/nkave/archives/summary" target="_blank" rel="noopener">日経平均プロフィル</a>。EPSは「日経平均÷PER(加重平均)」で算出。
+    データ出所: <a href="https://indexes.nikkei.co.jp/nkave/archives/summary" target="_blank" rel="noopener">日経平均プロフィル</a>。EPSは「日経平均÷PER(加重平均)」、BPSは「日経平均÷PBR(加重平均)」で算出。
     本ページは個人利用目的の自動生成であり、投資判断はご自身の責任でお願いします。
   </footer>
 </div>
